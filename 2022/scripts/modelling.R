@@ -75,6 +75,43 @@ ctrl_grid <- control_stack_grid()
 
 cv_folds = vfold_cv(train %>% mutate(HWin = as.factor(HWin)) %>% select(-c(HDiff)), strata = HWin)
 
+doParallel::registerDoParallel()
+
+# k nearest neighbors 
+knn_model_spec <- nearest_neighbor(
+  neighbors = tune(),
+  weight_func = tune(),
+  dist_power = tune()
+) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+knn_flow <- 
+  hoops_wflow %>% 
+  add_model(knn_model_spec)
+
+knn_param <- parameters(knn_wf) 
+
+knn_res <- tune_bayes(
+  knn_flow,
+  resamples = cv_folds,
+  param_info = knn_param,
+  iter = 1000,
+  metrics = metric_set(mn_log_loss),
+  initial = 15,
+  control =  control_bayes(
+    parallel_over = "resamples",
+    no_improve = 100,
+    uncertain = 10,
+    save_pred = F,
+    save_workflow = F,
+    time_limit = 600,
+    verbose = T
+  )
+)
+
+saveRDS(knn_res,"2022/knn_tune.RDS")
+
 # random forest me
 rand_forest_spec <- 
   rand_forest(
@@ -90,11 +127,10 @@ rand_forest_wflow <-
   add_model(rand_forest_spec)
 
 
-rf_grid <- grid_random(mtry(c(1, 13)),
-            trees(), 
-            min_n(), 
-            size = 100)
-
+# rf_grid <- grid_random(mtry(c(1, 13)),
+#                        trees(),
+#                        min_n(),
+#                        size = 100)
 # rand_forest_res <-
 #   tune_grid(
 #     object = rand_forest_wflow,
@@ -121,6 +157,7 @@ rf_res <- tune_bayes(
   metrics = metric_set(mn_log_loss),
   initial = 15,
   control =  control_bayes(
+    parallel_over = "resamples",
     no_improve = 100,
     uncertain = 10,
     save_pred = F,
@@ -130,6 +167,7 @@ rf_res <- tune_bayes(
   )
 )
 
+saveRDS(rf_res,"2022/random_forest_tune.RDS")
 
 # neural net - log loss is pretty high in the 0.6's, do not use this
 # also learning
@@ -183,8 +221,6 @@ xgb_params = parameters(
 xgb_wrkflw <- hoops_wflow %>% 
   add_model(xgb)
 
-doParallel::registerDoParallel()
-
 xgb_tune <- tune_bayes(
   xgb_wrkflw ,
   resamples = cv_folds,
@@ -195,6 +231,7 @@ xgb_tune <- tune_bayes(
   ),
   initial = 15,
   control = control_bayes(
+    parallel_over = "resamples",
     no_improve = 100,
     uncertain = 10,
     save_pred = F,
@@ -204,11 +241,14 @@ xgb_tune <- tune_bayes(
   )
 )
 
+saveRDS(xgb_tune,"2022/xgb_tune.RDS")
+
 # stack models
 model_st <- 
   # initialize the stack
   stacks() %>%
   # add candidate members
+  add_candidates(knn_res) %>% 
   add_candidates(rf_res) %>%
   add_candidates(xgb_tune) %>%
   # determine how to combine their predictions
@@ -217,20 +257,20 @@ model_st <-
   fit_members()
 
 
-model_st
+readRDS(model_st,"2022/models_stacked.RDS")
+
 
 
 # test <-
 #   test %>% bind_cols(predict(model_st, .))
-
-test_pred <-
-  test %>%
-  bind_cols(predict(model_st, ., type = "prob"))
-
-
-yardstick::roc_auc(
-  test_pred,
-  truth = as.factor(HWin),
-  .pred_TRUE
-)
-
+# test_pred <-
+#   test %>%
+#   bind_cols(predict(model_st, ., type = "prob"))
+# 
+# 
+# yardstick::roc_auc(
+#   test_pred,
+#   truth = as.factor(HWin),
+#   .pred_TRUE
+# )
+# 
