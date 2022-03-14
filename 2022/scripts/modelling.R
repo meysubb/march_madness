@@ -16,14 +16,14 @@ colSums(is.na(pre_19))
 # This Boruta Algorithm is super cool 
 # John was talking about it. Read more about it here: https://www.andreaperlato.com/mlpost/feature-selection-using-boruta-algorithm/
 
-outright_boruta = recipe(HWin ~ ., data = pre_19 %>% select(-c(HDiff,Season,DayNum,HTeamID,HScore,ATeamID,AScore,NumOT,NeutralFlag,loc))) %>%
-  step_impute_knn(all_predictors(), neighbors = 3) %>%
-  step_select_boruta(all_predictors(), outcome = "HWin")
-
-prepped = prep(outright_boruta)
-
-# This reccomends which variables to use
-prepped[['steps']][[2]][['res']][1]$finalDecision[which(prepped[['steps']][[2]][['res']][1]$finalDecision == 'Confirmed')]
+# outright_boruta = recipe(HWin ~ ., data = pre_19 %>% select(-c(HDiff,Season,DayNum,HTeamID,HScore,ATeamID,AScore,NumOT,NeutralFlag,loc))) %>%
+#   step_impute_knn(all_predictors(), neighbors = 3) %>%
+#   step_select_boruta(all_predictors(), outcome = "HWin")
+# 
+# prepped = prep(outright_boruta)
+# 
+# # This reccomends which variables to use
+# prepped[['steps']][[2]][['res']][1]$finalDecision[which(prepped[['steps']][[2]][['res']][1]$finalDecision == 'Confirmed')]
 
 ## interestingly enough what I learnt is that doesn't really matter a lot of these ordinal values
 ## take into account a teams skill which might be measured by box score metrics.
@@ -42,7 +42,8 @@ prepped[['steps']][[2]][['res']][1]$finalDecision[which(prepped[['steps']][[2]][
 # 
 metrics_selected <- c("SRS","RPI","MOV","TS","Colley","LRMC","Elo",
                       "MOR","POM","SAG","WLK","DOL",
-                      # i hand pick these next few. 
+                      # i hand pick these next few, lets see how it goes
+                      "Off","Def",
                       "PTS_POSMade","PTS_POSAllowed","FGM3_POSMade","FGM3_POSAllowed")
 
 res <- c("HDiff","HWin","SeedDiff")
@@ -64,14 +65,14 @@ train = pre_19 %>% select(keep_cols)
 test = post_19 %>% select(keep_cols)
 
 tournament_rec <- 
-  recipe(HWin ~ ., data = train %>% select(-c(HDiff))) 
+  recipe(HWin ~ ., data = train %>% select(-c(HDiff))) %>% 
+  step_normalize(all_predictors())
 
 hoops_wflow <- 
   workflow() %>% 
   add_recipe(tournament_rec)
 
 ctrl_grid <- control_stack_grid()
-
 
 cv_folds = vfold_cv(train %>% mutate(HWin = as.factor(HWin)) %>% select(-c(HDiff)), strata = HWin)
 
@@ -119,9 +120,7 @@ saveRDS(knn_res,"2022/knn_tune.RDS")
 # this won't work for some reason. idk why
 # lasso_model <- logistic_reg(penalty = tune(),
 #                             mixture = 1) %>%
-#   # Set the engine
 #   set_engine("glm") %>%
-#   # Set the mode
 #   set_mode("classification")
 # 
 # lasso_wf <- hoops_wflow %>% 
