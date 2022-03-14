@@ -75,7 +75,10 @@ ctrl_grid <- control_stack_grid()
 
 cv_folds = vfold_cv(train %>% mutate(HWin = as.factor(HWin)) %>% select(-c(HDiff)), strata = HWin)
 
-doParallel::registerDoParallel()
+library(doParallel)
+registerDoParallel()
+cl <- makePSOCKcluster(6) # select the number of cores to parallelize the calcs across
+registerDoParallel(cl)
 
 # k nearest neighbors 
 knn_model_spec <- nearest_neighbor(
@@ -90,13 +93,13 @@ knn_flow <-
   hoops_wflow %>% 
   add_model(knn_model_spec)
 
-knn_param <- parameters(knn_wf) 
+knn_param <- parameters(knn_flow) 
 
 knn_res <- tune_bayes(
   knn_flow,
   resamples = cv_folds,
   param_info = knn_param,
-  iter = 1000,
+  iter = 250,
   metrics = metric_set(mn_log_loss),
   initial = 15,
   control =  control_bayes(
@@ -111,6 +114,41 @@ knn_res <- tune_bayes(
 )
 
 saveRDS(knn_res,"2022/knn_tune.RDS")
+
+# logistic regression -- lasso 
+# this won't work for some reason. idk why
+# lasso_model <- logistic_reg(penalty = tune(),
+#                             mixture = 1) %>%
+#   # Set the engine
+#   set_engine("glm") %>%
+#   # Set the mode
+#   set_mode("classification")
+# 
+# lasso_wf <- hoops_wflow %>% 
+#   add_recipe(lasso_model)
+# 
+# lasso_param <- parameters(lasso_wf)
+# 
+# lasso_tune <- lasso_wf %>% 
+#   tune_bayes(
+#     lasso_wf,
+#     resamples = cv_folds,
+#     param_info = knn_param,
+#     iter = 1000,
+#     metrics = metric_set(mn_log_loss),
+#     initial = 15,
+#     control =  control_bayes(
+#       parallel_over = "resamples",
+#       no_improve = 100,
+#       uncertain = 10,
+#       save_pred = F,
+#       save_workflow = F,
+#       time_limit = 600,
+#       verbose = T
+#     )
+#   )
+#   
+# saveRDS(lasso_tune,"2022/lasso_tune.RDS")
 
 # random forest me
 rand_forest_spec <- 
@@ -248,7 +286,10 @@ model_st <-
   # initialize the stack
   stacks() %>%
   # add candidate members
+  # knn log loss eems quite high honestly but lets see. 
   add_candidates(knn_res) %>% 
+  # some problems with this
+  #add_candidates(lasso_tune) %>% 
   add_candidates(rf_res) %>%
   add_candidates(xgb_tune) %>%
   # determine how to combine their predictions
