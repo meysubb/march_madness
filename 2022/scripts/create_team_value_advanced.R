@@ -170,7 +170,7 @@ df <-
 saveRDS(df,"2022/adv_rtgs.RDS")
 
 
-massey_df <- read_csv("2022/kaggle_data/MMasseyOrdinals.csv") %>% group_by(Season) %>% nest() %>%  
+massey_df <- read_csv("2022/kaggle_data/MMasseyOrdinals_thruDay128.csv") %>% group_by(Season) %>% nest() %>%  
   mutate(
     massey_ords = purrr::map(data,create_massey)
   ) %>% select(-data) %>% unnest()
