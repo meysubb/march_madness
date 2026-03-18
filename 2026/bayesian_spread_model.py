@@ -37,7 +37,10 @@ def basic_spread_model(home_idx, away_idx, neutral, weights, T, line, home_win):
     mu = intercept * (1 - neutral) + beta[home_idx] - beta[away_idx]
     numpyro.deterministic("mu", mu)
 
-    numpyro.sample("line", dist.Normal(mu, sigma), obs=line)
+    # add some weighting?
+    weighted_sigma = sigma / jnp.sqrt(weights)
+    numpyro.sample("line", dist.Normal(mu, weighted_sigma), obs=line)
+    # numpyro.sample("line", dist.Normal(mu, sigma), obs=line)
 
 def fit(data, num_warmup=1000, num_samples=1000, num_chains=4, seed=42):
     """
@@ -52,7 +55,7 @@ def fit(data, num_warmup=1000, num_samples=1000, num_chains=4, seed=42):
     mcmc    : fitted MCMC object
     samples : dict of posterior samples
     """
-    kernel = NUTS(spread_model)
+    kernel = NUTS(basic_spread_model)
     mcmc = MCMC(kernel, num_warmup=num_warmup,
                 num_samples=num_samples, num_chains=num_chains)
 
