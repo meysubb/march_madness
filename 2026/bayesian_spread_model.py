@@ -44,7 +44,7 @@ def basic_spread_model(home_idx, away_idx, neutral, weights, T, line, home_win):
     numpyro.sample("line", dist.Normal(mu, weighted_sigma), obs=line)
     # numpyro.sample("line", dist.Normal(mu, sigma), obs=line)
 
-#' To go Off/Def, we can't use spread anymore, have to use the actual score. 
+#' using actual score here
 def off_def_model(home_idx, away_idx, conf_idx, neutral, weights, T, C, 
                   score_home=None, 
                   score_away=None,):
@@ -88,6 +88,63 @@ def off_def_model(home_idx, away_idx, conf_idx, neutral, weights, T, C,
     weighted_sigma = sigma / jnp.sqrt(weights)
     numpyro.sample("score_home", dist.Normal(mu_home, weighted_sigma), obs=score_home)
     numpyro.sample("score_away", dist.Normal(mu_away, weighted_sigma), obs=score_away)
+
+# line  (home margin) = mu_home - mu_away
+# total = mu_home + mu_away
+# so off/def ratings can be estimated straight from spread + total,
+# more accurate than using the actual score. 
+def off_def_line_total_model(home_idx, away_idx, conf_idx, neutral, weights, T, C,
+                              line=None,
+                              total=None,):
+
+    mu_intercept = numpyro.sample("mu_intercept", dist.Normal(70.0, 10.0))
+    alpha        = numpyro.sample("alpha", dist.Normal(3.0, 1.0))
+
+    # Conference Priors
+    sigma_off_conf = numpyro.sample("sigma_off_conf", dist.HalfNormal(5.0))
+    sigma_def_conf = numpyro.sample("sigma_def_conf", dist.HalfNormal(5.0))
+
+    with numpyro.plate("conferences", C):
+        mu_off_conf = numpyro.sample("mu_off_conf", dist.Normal(0.0, sigma_off_conf))
+        mu_def_conf = numpyro.sample("mu_def_conf", dist.Normal(0.0, sigma_def_conf))
+
+    sigma_off = numpyro.sample("sigma_off", dist.HalfNormal(5.0))
+    sigma_def = numpyro.sample("sigma_def", dist.HalfNormal(5.0))
+
+    # LKJ prior on within-conference off/def correlation
+    L_corr = numpyro.sample("L_corr", dist.LKJCholesky(dimension=2, concentration=2.0))
+    D = jnp.diag(jnp.array([sigma_off, sigma_def]))
+    L_cov = D @ L_corr   # (2, 2)
+
+    with numpyro.plate("teams", T):
+        z = numpyro.sample("z", dist.Normal(0.0, 1.0).expand([2]).to_event(1))
+
+    conf_means = jnp.stack([mu_off_conf[conf_idx],
+                            mu_def_conf[conf_idx]], axis=1)  # (T, 2)
+
+    team_effects = conf_means + z @ L_cov.T  # (T, 2)
+
+    off = numpyro.deterministic("off", team_effects[:, 0])  # (T,)
+    defense = numpyro.deterministic("def", team_effects[:, 1])  # (T,)
+
+    # line and total need their own noise scales -- vegas totals and
+    # spreads don't move with the same volatility.
+    sigma_line  = numpyro.sample("sigma_line", dist.HalfNormal(10.0))
+    sigma_total = numpyro.sample("sigma_total", dist.HalfNormal(10.0))
+
+    home_court = alpha * (1 - neutral)
+    mu_home = mu_intercept + off[home_idx] - defense[away_idx] + home_court
+    mu_away = mu_intercept + off[away_idx] - defense[home_idx] - home_court
+
+    implied_line  = numpyro.deterministic("implied_line", mu_home - mu_away)
+    implied_total = numpyro.deterministic("implied_total", mu_home + mu_away)
+
+    weighted_sigma_line  = sigma_line / jnp.sqrt(weights)
+    weighted_sigma_total = sigma_total / jnp.sqrt(weights)
+
+    numpyro.sample("line", dist.Normal(implied_line, weighted_sigma_line), obs=line)
+    numpyro.sample("total", dist.Normal(implied_total, weighted_sigma_total), obs=total)
+
 
 def fit(data, model_func, num_warmup=1000, num_samples=1000, num_chains=4, seed=42):
     """
